@@ -42,22 +42,7 @@ interface Announcement {
   type: 'tournament' | 'update' | 'event' | 'general';
 }
 
-// ─── Mock Data ───────────────────────────────────────────────────────────────
-
-const MOCK_LEADERBOARD: LeaderboardEntry[] = [
-  { rank: 1,  player_id: 'p1',  display_name: 'Alex Thunder',   current_elo: 1842, wins: 34, losses: 8,  total_matches: 42, win_rate: 81 },
-  { rank: 2,  player_id: 'p2',  display_name: 'Jordan Spike',   current_elo: 1790, wins: 29, losses: 11, total_matches: 40, win_rate: 72 },
-  { rank: 3,  player_id: 'p3',  display_name: 'Casey Serve',    current_elo: 1755, wins: 27, losses: 13, total_matches: 40, win_rate: 67 },
-  { rank: 4,  player_id: 'p4',  display_name: 'Morgan Volley',  current_elo: 1698, wins: 22, losses: 16, total_matches: 38, win_rate: 58 },
-  { rank: 5,  player_id: 'p5',  display_name: 'Riley Net',      current_elo: 1645, wins: 20, losses: 18, total_matches: 38, win_rate: 53 },
-  { rank: 6,  player_id: 'p6',  display_name: 'Sam Roundnet',   current_elo: 1610, wins: 18, losses: 20, total_matches: 38, win_rate: 47 },
-  { rank: 7,  player_id: 'p7',  display_name: 'Taylor Drop',    current_elo: 1580, wins: 16, losses: 21, total_matches: 37, win_rate: 43 },
-  { rank: 8,  player_id: 'p8',  display_name: 'Drew Slam',      current_elo: 1522, wins: 14, losses: 24, total_matches: 38, win_rate: 37 },
-  { rank: 9,  player_id: 'p9',  display_name: 'Quinn Bounce',   current_elo: 1488, wins: 12, losses: 26, total_matches: 38, win_rate: 32 },
-  { rank: 10, player_id: 'p10', display_name: 'Blake Spiker',   current_elo: 1445, wins: 10, losses: 28, total_matches: 38, win_rate: 26 },
-];
-
-// Announcements — newest first (index 0 = most recent)
+// Announcements — newest first (mock until announcements table is built)
 const MOCK_ANNOUNCEMENTS: Announcement[] = [
   {
     id: '1',
@@ -83,13 +68,11 @@ const MOCK_ANNOUNCEMENTS: Announcement[] = [
   {
     id: '4',
     title: '👋 Welcome New Members!',
-    content: '12 new players joined this semester. Complete your 10 placement matches to appear on the official leaderboard.',
+    content: 'Complete your 10 placement matches to appear on the official leaderboard.',
     date: '2025-01-20',
     type: 'general',
   },
 ];
-
-const MEDALS = ['🥇', '🥈', '🥉'];
 
 const TYPE_STYLES: Record<Announcement['type'], string> = {
   tournament: 'bg-purple-50  text-purple-700  border-purple-200',
@@ -105,7 +88,9 @@ export default function DashboardPage() {
   const { signOut } = useClerk();
   const router = useRouter();
 
-  const [leaderboard] = useState<LeaderboardEntry[]>(MOCK_LEADERBOARD);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [lbFilter, setLbFilter] = useState('All');
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [university, setUniversity] = useState('');
@@ -113,6 +98,23 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false);
 
   const avatarMenuRef = useRef<HTMLDivElement>(null);
+
+  // Fetch real leaderboard
+  useEffect(() => {
+    fetch('/api/leaderboard')
+      .then(r => r.json())
+      .then(data => setLeaderboard(Array.isArray(data) ? data : []))
+      .catch(() => setLeaderboard([]));
+  }, []);
+
+  // Fetch current player's DB id to know which row to highlight
+  useEffect(() => {
+    if (!isLoaded || !user) return;
+    fetch('/api/players/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.id) setMyPlayerId(data.id); })
+      .catch(() => {});
+  }, [isLoaded, user]);
 
   // Close avatar dropdown on outside click
   useEffect(() => {
@@ -134,15 +136,18 @@ export default function DashboardPage() {
   }
 
   // Derived player info
-  const firstName      = user?.firstName || 'Spiker';
-  const displayName    = user?.fullName || user?.username || 'Anonymous';
-  const initials       = ((user?.firstName?.[0] ?? '') + (user?.lastName?.[0] ?? '')).toUpperCase() || 'S';
-  const avatarUrl      = user?.imageUrl;
+  const firstName   = user?.firstName || 'Spiker';
+  const displayName = user?.fullName || user?.username || 'Anonymous';
+  const initials    = ((user?.firstName?.[0] ?? '') + (user?.lastName?.[0] ?? '')).toUpperCase() || 'S';
+  const avatarUrl   = user?.imageUrl;
 
-  // In production this comes from GET /api/players/me matched against the leaderboard
-  // For now we highlight rank 6 as a demo
-  const MY_PLAYER_ID = 'p6';
-  const myEntry = leaderboard.find(p => p.player_id === MY_PLAYER_ID);
+  const myEntry = leaderboard.find(p => p.player_id === myPlayerId);
+
+  const filteredLb = leaderboard.filter(p => {
+    if (lbFilter === 'Men')   return (p as any).gender === 'male';
+    if (lbFilter === 'Women') return (p as any).gender === 'female';
+    return true;
+  });
 
   const handleSaveProfile = async () => {
     setSaving(true);
@@ -235,67 +240,88 @@ export default function DashboardPage() {
 
             {/* ── Leaderboard ── */}
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <Trophy className="h-5 w-5 text-[#FFB81C]" />
-                <h2 className="text-lg font-bold text-[#0a0a0a]">Season Leaderboard</h2>
-              </div>
-
               <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+                {/* Header row matching homepage style */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+                  <div>
+                    <p className="text-xs font-medium tracking-widest uppercase" style={{ color: '#FFB81C' }}>Season 2025</p>
+                    <h2 className="text-xl font-bold text-gray-900">Leaderboard</h2>
+                  </div>
+                  <div className="flex gap-2">
+                    {['All', 'Men', 'Women'].map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setLbFilter(f)}
+                        className="text-xs px-3 py-1 rounded-full border transition-all duration-200"
+                        style={{
+                          borderColor: lbFilter === f ? '#FFB81C' : '#e5e5e5',
+                          color: lbFilter === f ? '#FFB81C' : '#888',
+                          backgroundColor: lbFilter === f ? 'rgba(255,184,28,0.08)' : 'transparent',
+                        }}>
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[520px]">
+                  <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-[#0a0a0a] text-white text-xs uppercase tracking-wider">
-                        <th className="text-left px-5 py-3 font-semibold w-16">Rank</th>
-                        <th className="text-left px-5 py-3 font-semibold">Player</th>
-                        <th className="text-right px-5 py-3 font-semibold">ELO</th>
-                        <th className="text-right px-5 py-3 font-semibold hidden sm:table-cell">W</th>
-                        <th className="text-right px-5 py-3 font-semibold hidden sm:table-cell">L</th>
-                        <th className="text-right px-5 py-3 font-semibold hidden md:table-cell">Win %</th>
+                      <tr style={{ backgroundColor: '#0a0a0a' }}>
+                        {['Rank', 'Player', 'ELO', 'Record', 'Ratio'].map(h => (
+                          <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: '#888' }}>{h}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {leaderboard.map((player, idx) => {
-                        const isMe = player.player_id === MY_PLAYER_ID;
+                      {filteredLb.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-400">
+                            No ranked players yet — complete your placement matches to appear here!
+                          </td>
+                        </tr>
+                      ) : filteredLb.map((player) => {
+                        const isMe = player.player_id === myPlayerId;
                         return (
                           <tr
                             key={player.player_id}
-                            className={`
-                              border-t transition-colors
-                              ${isMe
-                                ? 'bg-[#FFB81C]/10 border-[#FFB81C]/30'
-                                : idx % 2 === 0 ? 'bg-white border-gray-50' : 'bg-gray-50/40 border-gray-50'}
-                            `}
+                            className="border-t border-gray-50 transition-colors"
+                            style={{ backgroundColor: isMe ? 'rgba(255,184,28,0.08)' : undefined }}
+                            onMouseEnter={e => { if (!isMe) (e.currentTarget as HTMLElement).style.backgroundColor = '#fffbf0'; }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = isMe ? 'rgba(255,184,28,0.08)' : ''; }}
                           >
-                            <td className="px-5 py-3.5">
+                            <td className="px-4 py-2.5 font-bold text-xs">
                               {player.rank <= 3
-                                ? <span className="text-xl">{MEDALS[player.rank - 1]}</span>
-                                : <span className="text-sm font-semibold text-gray-400">#{player.rank}</span>}
+                                ? ['🥇','🥈','🥉'][player.rank - 1]
+                                : <span className="text-gray-400">#{player.rank}</span>}
                             </td>
-                            <td className="px-5 py-3.5">
+                            <td className="px-4 py-2.5">
                               <div className="flex items-center gap-2">
-                                <span className={`text-sm ${isMe ? 'font-bold text-[#0a0a0a]' : 'font-medium text-gray-800'}`}>
+                                <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                                  style={{ backgroundColor: '#0a0a0a', color: '#FFB81C' }}>
+                                  {(player.display_name || '?').charAt(0).toUpperCase()}
+                                </div>
+                                <span className={`text-xs ${isMe ? 'font-bold text-gray-900' : 'font-medium text-gray-900'}`}>
                                   {player.display_name}
                                 </span>
                                 {isMe && (
-                                  <span className="text-[10px] bg-[#FFB81C] text-[#0a0a0a] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none"
+                                    style={{ backgroundColor: '#FFB81C', color: '#0a0a0a' }}>
                                     YOU
                                   </span>
                                 )}
                               </div>
                             </td>
-                            <td className="px-5 py-3.5 text-right">
-                              <span className={`text-sm font-bold ${isMe ? 'text-[#0a0a0a]' : 'text-gray-700'}`}>
-                                {player.current_elo}
-                              </span>
+                            <td className="px-4 py-2.5 font-bold text-xs" style={{ color: '#FFB81C' }}>
+                              {player.current_elo}
                             </td>
-                            <td className="px-5 py-3.5 text-right hidden sm:table-cell">
-                              <span className="text-sm font-medium text-green-600">{player.wins}</span>
+                            <td className="px-4 py-2.5 text-xs">
+                              <span className="text-green-600 font-medium">{player.wins}W</span>
+                              <span className="text-gray-300 mx-1">–</span>
+                              <span className="text-red-400 font-medium">{player.losses}L</span>
                             </td>
-                            <td className="px-5 py-3.5 text-right hidden sm:table-cell">
-                              <span className="text-sm font-medium text-red-500">{player.losses}</span>
-                            </td>
-                            <td className="px-5 py-3.5 text-right hidden md:table-cell">
-                              <span className="text-sm text-gray-500">{player.win_rate}%</span>
+                            <td className="px-4 py-2.5 text-xs text-gray-500 font-medium">
+                              {player.total_matches > 0 ? Math.round(player.win_rate) : 0}%
                             </td>
                           </tr>
                         );

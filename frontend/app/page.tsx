@@ -6,17 +6,18 @@ import Link from 'next/link'
 import { HeroSection } from '@/components/ui/feature-carousel'
 import { ContainerScroll } from '@/components/ui/container-scroll-animation'
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-const LEADERBOARD = [
-  { rank: 1, name: 'Alex Carter',   elo: 1482, wins: 18, losses: 3,  gender: 'M' },
-  { rank: 2, name: 'Jordan Lee',    elo: 1431, wins: 15, losses: 5,  gender: 'M' },
-  { rank: 3, name: 'Taylor Brooks', elo: 1398, wins: 14, losses: 6,  gender: 'F' },
-  { rank: 4, name: 'Morgan Shaw',   elo: 1352, wins: 12, losses: 7,  gender: 'F' },
-  { rank: 5, name: 'Casey Kim',     elo: 1310, wins: 11, losses: 8,  gender: 'M' },
-  { rank: 6, name: 'Riley Evans',   elo: 1278, wins: 10, losses: 9,  gender: 'M' },
-  { rank: 7, name: 'Drew Patel',    elo: 1241, wins: 9,  losses: 10, gender: 'F' },
-  { rank: 8, name: 'Jamie Nguyen',  elo: 1205, wins: 7,  losses: 11, gender: 'M' },
-]
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface LeaderboardEntry {
+  rank: number
+  player_id: string
+  display_name: string
+  current_elo: number
+  wins: number
+  losses: number
+  total_matches: number
+  win_rate: number
+  gender?: string
+}
 
 const ANNOUNCEMENTS = [
   {
@@ -195,10 +196,18 @@ function Hero() {
 // ─── Scroll Preview ───────────────────────────────────────────────────────────
 function ScrollPreview() {
   const [filter, setFilter] = useState('All')
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
 
-  const filtered = LEADERBOARD.filter(p => {
-    if (filter === 'Men') return p.gender === 'M'
-    if (filter === 'Women') return p.gender === 'F'
+  useEffect(() => {
+    fetch('/api/leaderboard')
+      .then(r => r.json())
+      .then(data => setLeaderboard(Array.isArray(data) ? data : []))
+      .catch(() => setLeaderboard([]))
+  }, [])
+
+  const filtered = leaderboard.filter(p => {
+    if (filter === 'Men')   return p.gender === 'male'
+    if (filter === 'Women') return p.gender === 'female'
     return true
   })
 
@@ -267,8 +276,14 @@ function ScrollPreview() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.slice(0, 5).map((p) => (
-                  <tr key={p.rank} className="border-t border-gray-50 hover:bg-[#fffbf0] transition-colors">
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400">
+                      No ranked players yet — be the first to complete your placement matches!
+                    </td>
+                  </tr>
+                ) : filtered.slice(0, 5).map((p) => (
+                  <tr key={p.player_id} className="border-t border-gray-50 hover:bg-[#fffbf0] transition-colors">
                     <td className="px-4 py-2.5 font-bold text-xs">
                       {p.rank <= 3 ? ['🥇','🥈','🥉'][p.rank - 1] : <span className="text-gray-400">#{p.rank}</span>}
                     </td>
@@ -276,19 +291,19 @@ function ScrollPreview() {
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
                           style={{ backgroundColor: '#0a0a0a', color: '#FFB81C' }}>
-                          {p.name.charAt(0)}
+                          {(p.display_name || '?').charAt(0).toUpperCase()}
                         </div>
-                        <span className="font-medium text-gray-900 text-xs">{p.name}</span>
+                        <span className="font-medium text-gray-900 text-xs">{p.display_name}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-2.5 font-bold text-xs" style={{ color: '#FFB81C' }}>{p.elo}</td>
+                    <td className="px-4 py-2.5 font-bold text-xs" style={{ color: '#FFB81C' }}>{p.current_elo}</td>
                     <td className="px-4 py-2.5 text-xs">
                       <span className="text-green-600 font-medium">{p.wins}W</span>
                       <span className="text-gray-300 mx-1">–</span>
                       <span className="text-red-400 font-medium">{p.losses}L</span>
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-500 font-medium">
-                      {(p.wins / (p.wins + p.losses) * 100).toFixed(0)}%
+                      {p.total_matches > 0 ? Math.round(p.win_rate) : 0}%
                     </td>
                   </tr>
                 ))}
