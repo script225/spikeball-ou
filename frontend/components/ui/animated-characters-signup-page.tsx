@@ -1,5 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { useSignUp } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,13 +76,18 @@ const EyeBall = ({ size = 48, pupilSize = 16, maxDistance = 10, eyeColor = "whit
 
 // ─── Signup Page ──────────────────────────────────────────────────────────────
 function SignupPage() {
+  const { isLoaded, signUp, setActive } = useSignUp();
+  const router = useRouter();
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm]   = useState(false);
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", age: "", gender: "", password: "", confirm: "",
   });
-  const [error,     setError]     = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [verifying,  setVerifying]  = useState(false);
+  const [code,       setCode]       = useState("");
+  const [error,      setError]      = useState("");
+  const [isLoading,  setIsLoading]  = useState(false);
 
   // Character animation state
   const [isPurpleBlinking, setIsPurpleBlinking] = useState(false);
@@ -143,15 +150,62 @@ function SignupPage() {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
 
+  // Step 1 — create Clerk user + trigger email OTP
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isLoaded) return;
     setError("");
     if (form.password !== form.confirm) { setError("Passwords don't match."); return; }
-    if (Number(form.age) < 16 || Number(form.age) > 99) { setError("Please enter a valid age."); return; }
+    if (Number(form.age) < 16 || Number(form.age) > 99) { setError("Please enter a valid age (16–99)."); return; }
     setIsLoading(true);
-    await new Promise(r => setTimeout(r, 400));
-    setError("Signup not yet connected — Clerk integration coming soon.");
-    setIsLoading(false);
+    try {
+      await signUp.create({
+        firstName: form.firstName,
+        lastName: form.lastName,
+        emailAddress: form.email,
+        password: form.password,
+        unsafeMetadata: { age: Number(form.age), gender: form.gender },
+      });
+      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+      setVerifying(true);
+    } catch (err: any) {
+      setError(err.errors?.[0]?.longMessage ?? err.errors?.[0]?.message ?? "Sign up failed. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Step 2 — verify OTP, create Supabase player row, redirect
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isLoaded) return;
+    setError("");
+    setIsLoading(true);
+    try {
+      const result = await signUp.attemptEmailAddressVerification({ code });
+      if (result.status === "complete") {
+        // Create player record in Supabase (status: pending, awaiting admin approval)
+        await fetch("/api/players", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            firstName: form.firstName,
+            lastName: form.lastName,
+            email: form.email,
+            age: Number(form.age),
+            gender: form.gender,
+          }),
+        });
+        await setActive({ session: result.createdSessionId });
+        router.push("/dashboard");
+      } else {
+        setError("Verification incomplete. Please try again.");
+      }
+    } catch (err: any) {
+      setError(err.errors?.[0]?.longMessage ?? err.errors?.[0]?.message ?? "Invalid code.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -314,103 +368,151 @@ function SignupPage() {
 
           {/* Header */}
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold tracking-tight mb-2 text-gray-900">Create an account</h1>
-            <p className="text-gray-500 text-sm">Join the OU Roundnet Club and start competing</p>
+            <h1 className="text-3xl font-bold tracking-tight mb-2 text-gray-900">
+              {verifying ? "Check your email" : "Create an account"}
+            </h1>
+            <p className="text-gray-500 text-sm">
+              {verifying
+                ? `We sent a 6-digit code to ${form.email}`
+                : "Join the OU Roundnet Club and start competing"}
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Name row */}
-            <div className="grid grid-cols-2 gap-3">
+          {/* ── OTP verification step ── */}
+          {verifying ? (
+            <form onSubmit={handleVerify} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="firstName" className="text-sm font-medium text-gray-700">First name</Label>
-                <Input id="firstName" placeholder="Jane" value={form.firstName}
-                  onChange={set("firstName")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
-                  required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
+                <Label htmlFor="code" className="text-sm font-medium text-gray-700">Verification code</Label>
+                <Input
+                  id="code"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={code}
+                  onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+                  autoFocus
+                  required
+                  className="h-11 text-center text-xl tracking-[0.4em] border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]"
+                />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="lastName" className="text-sm font-medium text-gray-700">Last name</Label>
-                <Input id="lastName" placeholder="Doe" value={form.lastName}
-                  onChange={set("lastName")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
-                  required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
-              </div>
-            </div>
 
-            {/* Email */}
-            <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email</Label>
-              <Input id="email" type="email" placeholder="you@oakland.edu" value={form.email}
-                onChange={set("email")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
-                required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
-            </div>
+              {error && (
+                <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg">{error}</div>
+              )}
 
-            {/* Age + Gender row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="age" className="text-sm font-medium text-gray-700">Age</Label>
-                <Input id="age" type="number" min={16} max={99} placeholder="21" value={form.age}
-                  onChange={set("age")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
-                  required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="gender" className="text-sm font-medium text-gray-700">Gender</Label>
-                <select id="gender" value={form.gender} onChange={set("gender")} required
-                  onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
-                  className="h-11 w-full rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-900
-                    focus:outline-none focus:border-[#FFB81C] focus:ring-1 focus:ring-[#FFB81C] transition-colors">
-                  <option value="" disabled>Select…</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="non-binary">Non-binary</option>
-                  <option value="prefer-not">Prefer not to say</option>
-                </select>
-              </div>
-            </div>
+              <button type="submit" disabled={isLoading || code.length < 6}
+                className="w-full h-11 rounded-lg font-semibold text-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 mt-2"
+                style={{ backgroundColor: "#FFB81C", color: "#0a0a0a" }}>
+                {isLoading ? "Verifying…" : "Verify & Continue"}
+              </button>
 
-            {/* Password */}
-            <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password</Label>
-              <div className="relative">
-                <Input id="password" type={showPassword ? "text" : "password"} placeholder="••••••••"
-                  value={form.password} onChange={set("password")} required
-                  className="h-11 pr-10 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              <p className="text-center text-sm text-gray-500">
+                Wrong email?{" "}
+                <button type="button" onClick={() => { setVerifying(false); setCode(""); setError(""); }}
+                  className="font-semibold hover:underline" style={{ color: "#FFB81C" }}>
+                  Go back
                 </button>
+              </p>
+            </form>
+          ) : (
+            /* ── Signup form ── */
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Name row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="firstName" className="text-sm font-medium text-gray-700">First name</Label>
+                  <Input id="firstName" placeholder="Jane" value={form.firstName}
+                    onChange={set("firstName")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
+                    required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="lastName" className="text-sm font-medium text-gray-700">Last name</Label>
+                  <Input id="lastName" placeholder="Doe" value={form.lastName}
+                    onChange={set("lastName")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
+                    required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
+                </div>
               </div>
-            </div>
 
-            {/* Confirm password */}
-            <div className="space-y-1.5">
-              <Label htmlFor="confirm" className="text-sm font-medium text-gray-700">Confirm password</Label>
-              <div className="relative">
-                <Input id="confirm" type={showConfirm ? "text" : "password"} placeholder="••••••••"
-                  value={form.confirm} onChange={set("confirm")} required
-                  className="h-11 pr-10 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
-                <button type="button" onClick={() => setShowConfirm(!showConfirm)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
-                  {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+              {/* Email */}
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email</Label>
+                <Input id="email" type="email" placeholder="you@oakland.edu" value={form.email}
+                  onChange={set("email")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
+                  required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
               </div>
-            </div>
 
-            {error && (
-              <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg">{error}</div>
-            )}
+              {/* Age + Gender row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="age" className="text-sm font-medium text-gray-700">Age</Label>
+                  <Input id="age" type="number" min={16} max={99} placeholder="21" value={form.age}
+                    onChange={set("age")} onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
+                    required className="h-11 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="gender" className="text-sm font-medium text-gray-700">Gender</Label>
+                  <select id="gender" value={form.gender} onChange={set("gender")} required
+                    onFocus={() => setIsTyping(true)} onBlur={() => setIsTyping(false)}
+                    className="h-11 w-full rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-900
+                      focus:outline-none focus:border-[#FFB81C] focus:ring-1 focus:ring-[#FFB81C] transition-colors">
+                    <option value="" disabled>Select…</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="non-binary">Non-binary</option>
+                    <option value="prefer-not">Prefer not to say</option>
+                  </select>
+                </div>
+              </div>
 
-            <button type="submit" disabled={isLoading}
-              className="w-full h-11 rounded-lg font-semibold text-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 mt-2"
-              style={{ backgroundColor: "#FFB81C", color: "#0a0a0a" }}>
-              {isLoading ? "Creating account…" : "Create account"}
-            </button>
-          </form>
+              {/* Password */}
+              <div className="space-y-1.5">
+                <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password</Label>
+                <div className="relative">
+                  <Input id="password" type={showPassword ? "text" : "password"} placeholder="••••••••"
+                    value={form.password} onChange={set("password")} required
+                    className="h-11 pr-10 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
 
-          <p className="text-center text-sm text-gray-500 mt-6">
-            Already have an account?{" "}
-            <Link href="/login" className="font-semibold hover:underline" style={{ color: "#FFB81C" }}>
-              Log in
-            </Link>
-          </p>
+              {/* Confirm password */}
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm" className="text-sm font-medium text-gray-700">Confirm password</Label>
+                <div className="relative">
+                  <Input id="confirm" type={showConfirm ? "text" : "password"} placeholder="••••••••"
+                    value={form.confirm} onChange={set("confirm")} required
+                    className="h-11 pr-10 border-gray-200 focus:border-[#FFB81C] focus:ring-[#FFB81C]" />
+                  <button type="button" onClick={() => setShowConfirm(!showConfirm)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
+                    {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg">{error}</div>
+              )}
+
+              <button type="submit" disabled={isLoading || !isLoaded}
+                className="w-full h-11 rounded-lg font-semibold text-sm transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 mt-2"
+                style={{ backgroundColor: "#FFB81C", color: "#0a0a0a" }}>
+                {isLoading ? "Creating account…" : "Create account"}
+              </button>
+            </form>
+          )}
+
+          {!verifying && (
+            <p className="text-center text-sm text-gray-500 mt-6">
+              Already have an account?{" "}
+              <Link href="/login" className="font-semibold hover:underline" style={{ color: "#FFB81C" }}>
+                Log in
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>
