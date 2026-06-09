@@ -58,6 +58,15 @@ body {
 ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gold); }
 
+/* Hide scrollbar utility */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Gold accent */
 .text-gold { color: var(--gold); }
 .bg-gold { background-color: var(--gold); }
