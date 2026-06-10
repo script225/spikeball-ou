@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from('elo_history')
-    .select('elo_before, elo_change, elo_after, recorded_at, season_id')
+    .select('match_id, elo_before, elo_change, elo_after, recorded_at, season_id')
     .eq('player_id', player.id)
     .order('recorded_at', { ascending: true });
 
