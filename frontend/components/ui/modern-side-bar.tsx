@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Home,
-  Trophy,
+  User,
   History,
   BarChart3,
   Swords,
@@ -26,7 +26,7 @@ interface NavigationItem {
 
 const navigationItems: NavigationItem[] = [
   { id: 'dashboard',  name: 'Dashboard',      icon: Home,     href: '/dashboard' },
-  { id: 'ranking',    name: 'My Ranking',      icon: Trophy,   href: '/dashboard/ranking' },
+  { id: 'profile',    name: 'My Profile',      icon: User,     href: '/dashboard/profile' },
   { id: 'history',    name: 'Match History',   icon: History,  href: '/dashboard/history' },
   { id: 'analytics',  name: 'Analytics',       icon: BarChart3, href: '/dashboard/analytics' },
   { id: 'submit',     name: 'Submit Score',    icon: Swords,   href: '/dashboard/submit' },
