@@ -4,7 +4,7 @@ import { useUser } from '@clerk/nextjs';
 import { Sidebar } from '@/components/ui/modern-side-bar';
 import { useClerk } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
-import { Trophy, Swords, Star, TrendingUp, Calendar, User, ShieldCheck } from 'lucide-react';
+import { Trophy, Swords, Star, TrendingUp, User, ShieldCheck } from 'lucide-react';
 
 interface Player {
   id: string;
@@ -75,38 +75,46 @@ export default function ProfilePage() {
   const { signOut } = useClerk();
   const router = useRouter();
 
-  const [player, setPlayer]         = useState<Player | null>(null);
+  const [player, setPlayer]           = useState<Player | null>(null);
   const [seasonStats, setSeasonStats] = useState<SeasonStats | null>(null);
-  const [alltime, setAlltime]       = useState<AlltimeStats | null>(null);
-  const [loading, setLoading]       = useState(true);
+  const [alltime, setAlltime]         = useState<AlltimeStats | null>(null);
+  const [loading, setLoading]         = useState(true);
 
-  // Fetch player record
   useEffect(() => {
     if (!isLoaded) return;
-    fetch('/api/players/me')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setPlayer(data); });
+
+    const load = async () => {
+      try {
+        // Always fetch player first — everything else needs the player id
+        const playerRes = await fetch('/api/players/me');
+        const playerData: Player | null = playerRes.ok ? await playerRes.json() : null;
+        if (playerData) setPlayer(playerData);
+
+        // Fetch season stats + all-time in parallel (even if playerData is null — they'll return empty gracefully)
+        const [lbRes, atRes] = await Promise.all([
+          fetch('/api/leaderboard'),
+          fetch('/api/players/me/alltime'),
+        ]);
+
+        if (lbRes.ok && playerData) {
+          const rows: (SeasonStats & { player_id: string })[] = await lbRes.json();
+          const mine = rows.find(r => r.player_id === playerData.id);
+          if (mine) setSeasonStats(mine);
+        }
+
+        if (atRes.ok) {
+          const atData: AlltimeStats = await atRes.json();
+          setAlltime(atData);
+        }
+      } catch {
+        // silently fail — page still renders with whatever loaded
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
   }, [isLoaded]);
-
-  // Fetch season stats by finding this player in the leaderboard
-  useEffect(() => {
-    if (!player) return;
-    fetch('/api/leaderboard')
-      .then(r => r.json())
-      .then((rows: (SeasonStats & { player_id: string })[]) => {
-        const mine = rows.find(r => r.player_id === player.id);
-        if (mine) setSeasonStats(mine);
-      });
-  }, [player]);
-
-  // Fetch all-time stats
-  useEffect(() => {
-    if (!player) return;
-    fetch('/api/players/me/alltime')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setAlltime(data); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [player]);
 
   const handleSignOut = async () => {
     await signOut();
