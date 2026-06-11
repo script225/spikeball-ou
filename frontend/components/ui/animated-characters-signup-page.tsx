@@ -184,8 +184,12 @@ function SignupPage() {
     try {
       const result = await signUp.attemptEmailAddressVerification({ code });
       if (result.status === "complete") {
+        // Activate the session FIRST — /api/players requires an authenticated
+        // request, and the auth cookie isn't set until setActive resolves.
+        await setActive({ session: result.createdSessionId });
+
         // Create player record in Supabase (status: pending, awaiting admin approval)
-        await fetch("/api/players", {
+        const playerRes = await fetch("/api/players", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -196,7 +200,11 @@ function SignupPage() {
             gender: form.gender,
           }),
         });
-        await setActive({ session: result.createdSessionId });
+        if (!playerRes.ok) {
+          const data = await playerRes.json().catch(() => ({}));
+          console.error("Failed to create player record:", data.error);
+        }
+
         router.push("/dashboard");
       } else {
         setError("Verification incomplete. Please try again.");
